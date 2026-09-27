@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "6"
+# ///
 # MAGIC %md
 # MAGIC # MVP de Engenharia de Dados — produtividade de equipes na confecção
 # MAGIC Este notebook organiza registros públicos de produtividade de equipes de confecção em tabelas Delta no Databricks Free Edition. A carga preserva os dados originais na Bronze, padroniza tipos e setores na Silver e produz três agregações Gold para analisar o cumprimento de metas por setor, data e equipe.
@@ -62,6 +66,22 @@ display(br.groupBy("department").agg(F.count("*").alias("linhas"), F.sum(F.when(
 # COMMAND ----------
 
 numeric_columns = ["targeted_productivity", "smv", "wip", "over_time", "incentive", "idle_time", "idle_men", "no_of_style_change", "no_of_workers", "actual_productivity"]
+falhas_conversao = br.agg(*[
+    F.sum(
+        F.when(
+            F.col(campo).isNotNull()
+            & (F.trim(F.col(campo)) != "")
+            & F.expr(f"try_cast(trim(`{campo}`) as double)").isNull(),
+            1
+        ).otherwise(0)
+    ).alias(campo)
+    for campo in numeric_columns
+]).first().asDict()
+
+print("Falhas de conversão numérica:", falhas_conversao)
+assert all(valor == 0 for valor in falhas_conversao.values()), (
+    f"Valores preenchidos não convertidos: {falhas_conversao}"
+)
 typed = br.select(*[F.col(c) for c in source_columns], "source_file")
 typed = typed.withColumn("data_registro", F.to_date("date", "M/d/yyyy"))
 typed = typed.withColumn("equipe", F.expr("try_cast(team as int)"))
@@ -101,7 +121,7 @@ print("Produtividade > 1:", s.filter("produtividade_acima_de_um").count())
 for field in numeric_columns:
     values = s.agg(F.count(F.col(field)).alias("informados"), F.min(field).alias("minimo"), F.max(field).alias("maximo")).first()
     print(field, values.asDict())
-print("Categorias de trimestre do mês e de setor:")
+print("Categorias de subdivisão do mês e de setor:")
 display(s.groupBy("quarter", "setor").count().orderBy("quarter", "setor"))
 
 # COMMAND ----------
@@ -166,7 +186,7 @@ assert spark.table(f"{TABLE_PREFIX}.gold_produtividade_setor").agg(F.sum("regist
 
 # MAGIC %md
 # MAGIC ## 7. Consultas e resultados
-# MAGIC A primeira consulta resume o cumprimento das metas por setor. As duas tabelas seguintes mostram a evolução por data e setor e a comparação entre equipes. A última consulta relaciona os indicadores operacionais ao cumprimento da meta em cada setor. Essas comparações não permitem inferir causalidade.
+# MAGIC A primeira consulta resume o cumprimento das metas por setor. Em seguida, as tabelas Gold mostram os resultados por data e setor e por equipe. Um resumo mensal calculado a partir da Gold diária reúne os registros e as metas atingidas de cada mês e setor. A última consulta compara indicadores operacionais entre registros que atingiram ou não a meta. Essas comparações são descritivas e não demonstram causalidade.
 
 # COMMAND ----------
 
@@ -175,6 +195,24 @@ display(spark.sql(f"SELECT * FROM {TABLE_PREFIX}.gold_produtividade_setor ORDER 
 print("Pergunta 2: evolução diária por setor e resultados por equipe")
 display(spark.sql(f"SELECT * FROM {TABLE_PREFIX}.gold_produtividade_dia_setor ORDER BY data_registro, setor"))
 display(spark.sql(f"SELECT * FROM {TABLE_PREFIX}.gold_produtividade_equipe ORDER BY setor, equipe"))
+print("Pergunta 2: resumo mensal por setor")
+mensal = (
+    spark.table(f"{TABLE_PREFIX}.gold_produtividade_dia_setor")
+    .groupBy(
+        F.date_format("data_registro", "yyyy-MM").alias("mes"),
+        "setor"
+    )
+    .agg(
+        F.sum("registros").alias("registros"),
+        F.sum("metas_atingidas").alias("metas_atingidas")
+    )
+    .withColumn(
+        "percentual_metas_atingidas",
+        F.round(100 * F.col("metas_atingidas") / F.col("registros"), 2)
+    )
+    .orderBy("mes", "setor")
+)
+display(mensal)
 print("Pergunta 3: indicadores operacionais por setor e cumprimento de meta")
 display(s.groupBy("setor", "atingiu_meta").agg(
     F.count("*").alias("registros"), F.round(F.avg("over_time"), 2).alias("minutos_extras_medios"),
