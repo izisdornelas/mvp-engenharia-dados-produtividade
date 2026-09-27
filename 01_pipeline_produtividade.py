@@ -107,6 +107,33 @@ display(s.groupBy("quarter", "setor").count().orderBy("quarter", "setor"))
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ### Triagem de valores extremos pelo intervalo interquartil
+# MAGIC Para cada medida numérica, valores além de 1,5 vez o intervalo interquartil (IQR) são sinalizados para investigação, sem descarte. Quando Q1 e Q3 são iguais, o método não é aplicado: nesses campos, qualquer valor diferente da concentração principal seria marcado como extremo.
+
+# COMMAND ----------
+
+for campo in numeric_columns:
+    valores = s.where(F.col(campo).isNotNull())
+    q1, q3 = valores.approxQuantile(campo, [0.25, 0.75], 0)
+    iqr = q3 - q1
+    if iqr == 0:
+        print(f"{campo}: Q1={q1:.2f}; Q3={q3:.2f}; IQR=0; "
+              "critério de extremos não aplicado")
+        continue
+    inferior = q1 - 1.5 * iqr
+    superior = q3 + 1.5 * iqr
+    extremos = valores.where(
+        (F.col(campo) < inferior) | (F.col(campo) > superior)
+    ).count()
+    print(
+        f"{campo}: Q1={q1:.2f}; Q3={q3:.2f}; "
+        f"limites=[{inferior:.2f}, {superior:.2f}]; "
+        f"candidatos={extremos}"
+    )
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## 6. Gold — tabelas próprias para as perguntas
 # MAGIC O percentual de metas cumpridas sempre usa o total de registros do grupo como denominador. A média de `wip` ignora valores nulos e mostra quantos registros a sustentam.
 
