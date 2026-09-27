@@ -1,13 +1,13 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # MVP — produtividade de equipes na confecção
-# MAGIC Fonte: [UCI, licença CC BY 4.0](https://archive.ics.uci.edu/dataset/597/productivity+prediction+of+garment+employees).
-# MAGIC Execute primeiro a célula de preparação. Faça upload manual do arquivo `garments_worker_productivity.csv` ao volume indicado e, então, execute o restante de cima para baixo. A Free Edition pode restringir acesso externo; por isso a ingestão não depende de download pela internet.
-# MAGIC **Status (22/09/2026):** executado no Databricks Free Edition; as cinco tabelas persistentes e as saídas foram conferidas. O HTML exportado com resultados registra a execução.
+# MAGIC # MVP de Engenharia de Dados — produtividade de equipes na confecção
+# MAGIC Este notebook organiza registros públicos de produtividade de equipes de confecção em tabelas Delta no Databricks Free Edition. A carga preserva os dados originais na Bronze, padroniza tipos e setores na Silver e produz três agregações Gold para analisar o cumprimento de metas por setor, data e equipe.
+# MAGIC A fonte é o conjunto [Productivity Prediction of Garment Employees](https://archive.ics.uci.edu/dataset/597/productivity+prediction+of+garment+employees), da UCI Machine Learning Repository (DOI 10.24432/C51S6D; licença CC BY 4.0). O arquivo `garments_worker_productivity.csv` foi armazenado em um volume do Unity Catalog e permanece disponível para reexecução.
+# MAGIC As consultas finais respondem a três questões: proporção de metas atingidas por setor, variação dos resultados no período e entre equipes, e distribuição de indicadores operacionais segundo o cumprimento da meta. As associações observadas são descritivas.
 
 # COMMAND ----------
 
-# 1. Configuração. Use um catálogo/esquema onde sua conta possa criar tabelas e volumes.
+# 1. Configuração do esquema e do volume de origem.
 from pyspark.sql import functions as F
 
 CATALOG = "workspace"
@@ -19,13 +19,13 @@ spark.sql(f"CREATE SCHEMA IF NOT EXISTS `{CATALOG}`.`{SCHEMA}`")
 spark.sql(f"CREATE VOLUME IF NOT EXISTS `{CATALOG}`.`{SCHEMA}`.`{VOLUME}`")
 CSV_PATH = f"/Volumes/{CATALOG}/{SCHEMA}/{VOLUME}/{CSV_NAME}"
 TABLE_PREFIX = f"{CATALOG}.{SCHEMA}"
-print("Envie o CSV a:", CSV_PATH)
+print("Arquivo CSV de origem:", CSV_PATH)
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ## 2. Bronze — preservar a estrutura e os valores recebidos
-# MAGIC Faça o upload do CSV para o volume antes de executar a próxima célula. Todos os campos são lidos como texto; o arquivo original continua guardado no volume.
+# MAGIC O arquivo original está no volume `entrada_uci`. Os 15 campos são lidos como texto e gravados em Delta com os metadados `source_file` e `ingested_at`. A conferência dos nomes das colunas verifica a estrutura esperada antes da gravação.
 
 # COMMAND ----------
 
@@ -41,7 +41,7 @@ display(spark.table(f"{TABLE_PREFIX}.bronze_produtividade").limit(5))
 
 # MAGIC %md
 # MAGIC ## 3. Perfil inicial — todos os atributos
-# MAGIC Valores vazios e nulos são mostrados por coluna. Examinar domínio, datas, duplicatas e valores extremos antes de decidir tratamentos.
+# MAGIC A inspeção apresenta a quantidade de ausências e de valores distintos para cada atributo, verifica linhas repetidas e relaciona as variações de `department` à ausência de `wip`.
 
 # COMMAND ----------
 
@@ -90,7 +90,7 @@ print("Linhas Silver:", spark.table(f"{TABLE_PREFIX}.silver_produtividade").coun
 
 # MAGIC %md
 # MAGIC ## 5. Evidências de qualidade
-# MAGIC Registrar no relatório as contagens, os limites observados e o impacto de cada regra. Um extremo é candidato a investigação; não é automaticamente um erro.
+# MAGIC As verificações abaixo reconciliam as contagens da Bronze e da Silver, quantificam os valores ausentes de `wip` e as produtividades superiores a 1 e apresentam os limites observados das medidas numéricas. Os extremos são preservados para investigação, sem classificação automática como erro.
 
 # COMMAND ----------
 
@@ -138,8 +138,8 @@ assert spark.table(f"{TABLE_PREFIX}.gold_produtividade_setor").agg(F.sum("regist
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 7. Respostas técnicas — capturar resultados na plataforma
-# MAGIC Interpretar os resultados observados no relatório após executar o notebook. Comparações de indicadores operacionais são descritivas e não identificam causa.
+# MAGIC ## 7. Consultas e resultados
+# MAGIC A primeira consulta resume o cumprimento das metas por setor. As duas tabelas seguintes mostram a evolução por data e setor e a comparação entre equipes. A última consulta relaciona os indicadores operacionais ao cumprimento da meta em cada setor. Essas comparações não permitem inferir causalidade.
 
 # COMMAND ----------
 
